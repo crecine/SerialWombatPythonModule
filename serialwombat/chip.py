@@ -3,6 +3,7 @@ import serial
 import socket
 import pigpio
 import select
+from serialwombat.enum import *
 
 def millis():
    return (time.perf_counter_ns() /1000000)
@@ -17,33 +18,11 @@ class SerialWombatChip:
     sendReadyTime = 0
     lastErrorCode = 0
 
-    def _configureDigitalPin(self, pin, state, pullDown=False, openDrain=False):
-        if (pin >= self.WOMBAT_MAXIMUM_PINS):
-            return -32767
-        tx = [200, pin, 0, 0, 0, 0, 0, 0x55]
-        if (state == 0): #input
-            tx[3] = 2 #input
-        elif (state == 1): #output
-            if (state == 0):  #LOW
-                tx[3] = 0  #low
-            elif (state == 1):
-                tx[3] = 1
-            else:
-                return
-        elif (state == 2 ): #pullup
-            tx[3] = 2 #input
-            tx[4] = 1 #Pullup on 
-        else:
-            return
-        tx[6] = openDrain
-        tx[5] = pullDown
-        self.sendPacket(tx)
-
     def sendPacket(self, tx):
         return 8
 
     def sendPacket (self,tx,rx):
-        return 8,[0x55,0x55,0x55,0x55,0x55,0x55,0x55]
+        return 8,[NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE]
 
     def begin(self,reset = True):
         if (reset):
@@ -89,16 +68,16 @@ class SerialWombatChip:
         self.sendPacket(list(bytearray("ReSeT!#*", encoding = 'utf8')))
 
     def readPublicData(self,pin):
-        tx = [0x81, pin, 255, 255, 0x55, 0x55, 0x55, 0x55]
+        tx = [CMD_BINARY_READ_PIN_BUFFFER, pin, 255, 255, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE]
         count, rx = self.sendPacket(tx)
         return rx[2]+ rx[3] * 256
 
     def writePublicData(self,pin, value):
-        tx = [0x82, pin, value & 0xFF, int(value / 256), 255, 0x55, 0x55, 0x55, 0x55]
+        tx = [CMD_BINARY_SET_PIN_BUFFFER, pin, value & 0xFF, int(value / 256), 255, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE]
         count, rx = self.sendPacket(tx)
         return rx[2] + rx[3] * 256
 
-    def writeUserBuffer(self,address,buf,count):
+    def writeUserBuffer(self, address, buf, count):
         bytesToSend = 0
         bytesSent = 0
         if (count == 0):
@@ -111,7 +90,7 @@ class SerialWombatChip:
             bytesToSend = 4
             count -= 4
 
-        tx = [0x84, address & 0xFF, address / 256, bytesToSend, 0x55, 0x55, 0x55, 0x55]
+        tx = [CMD_BINARY_WRITE_USER_BUFFER, address & 0xFF, address / 256, bytesToSend, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE]
         for i in range (bytesToSend):
             tx[4+i] = buf[i]
         count, result = self.sendPacket(tx)
@@ -120,7 +99,7 @@ class SerialWombatChip:
         bytesSent = bytesToSend
 
         while (count >= 7):
-            tx = [0x85, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55]
+            tx = [CMD_BINARY_WRITE_USER_BUFFER_CONTINUE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE]
             for i in range(7):
                 tx[i+1] = buf[bytesSent + i]
             count,rx = self.sendPacket(tx)
@@ -136,7 +115,7 @@ class SerialWombatChip:
             else:
                 count -=4
             a = address + bytesSent
-            tx = [84, a & 0xFF, a/256, bytesToSend, 0x55, 0x55, 0x55, 0x55]
+            tx = [CMD_BINARY_WRITE_USER_BUFFER, a & 0xFF, a/256, bytesToSend, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE]
             for i in range(count):
                 tx[4+i] = buf[i + bytesSent]
             count, rx = self.sendPacket(tx)
@@ -148,13 +127,13 @@ class SerialWombatChip:
 
     def returnErrorCode(self,rx):
         out = rx[1] - ord('0')
-        out *=10;
+        out *=10
         out += rx[2] - ord('0')
-        out *=10;
+        out *=10
         out += rx[3] - ord('0')
-        out *=10;
+        out *=10
         out += rx[4] - ord('0')
-        out *=10;
+        out *=10
         out += rx[5] - ord('0')
         return (out)
 
@@ -163,9 +142,8 @@ class SWChipUART(SerialWombatChip):
     def __init__(self,portname):
         self.ser = serial.Serial(portname,115200,timeout=0)
 
-
     def sendPacket (self,tx):
-        clear = [0x55,0x55,0x55,0x55,0x55,0x55,0x55,0x55]
+        clear = [NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE]
         self.ser.write(clear)
         time.sleep(0.002)
         rx = self.ser.read(size=8) 
@@ -182,7 +160,6 @@ class SWChipUART(SerialWombatChip):
             time.sleep(.002)
             delaycount += 1
         return 8,rx  #TODO add error check, size check
-
 class SWChipTCP(SerialWombatChip):
     def __init__(self, host, port):
         self.ser = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -190,7 +167,7 @@ class SWChipTCP(SerialWombatChip):
         self.ser.setblocking(0)
 
     def sendPacket (self,tx):
-        clear = [0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55]
+        clear = [NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE]
         self.ser.sendall(bytearray(clear))
         time.sleep(0.002)
 
@@ -220,8 +197,8 @@ class SWChipPigpioI2c(SerialWombatChip):
         self.freq = freq
         self.i2cAddress = i2cAddress
 
-    def sendPacket (self,tx):
-        self.pi.bb_i2c_open(self.sda,self.scl,self.freq)
+    def sendPacket (self, tx):
+        self.pi.bb_i2c_open(self.sda, self.scl, self.freq)
         self.pi.bb_i2c_zip(self.sda, [4, self.i2cAddress, 2, 7, 8] + tx + [3, 0])
         time.sleep(0.002)
         rx = self.pi.bb_i2c_zip(self.sda, [4, self.i2cAddress, 2, 6, 8, 3, 0])

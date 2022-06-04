@@ -1,6 +1,7 @@
-
+from serialwombat.enum import *
 class SerialWombatPin (object):
     def __init__(self, sw, pin):
+        """Construct a pin object by providing a SerialWombat chip instance and a specified pin number"""
         self._sw = sw
         self._pin = pin
 
@@ -8,33 +9,50 @@ class SerialWombatPin (object):
     def pin(self):
         return self._pin
 
-class DigitalPin (SerialWombatPin):
-    def begin(self, state, pullDown = False, openDrain = False):
-        self._sw._configureDigitalPin(self._pin, state, pullDown, openDrain)
+class DigitalIO (SerialWombatPin):
+    def begin(self, mode, state, pullDown = False, openDrain = False):
+        if self._pin >= self._sw.WOMBAT_MAXIMUM_PINS:
+            return -32767
+        
+        if mode == PIN_MODE_DIGITAL_IO: #input
+            state = PIN_STATE_INPUT #input
+        if state == PIN_STATE_INPUT: #pullup
+            pullUp = True #Pullup on
+        else:
+            pullUp = False
+
+        tx = [CFG_PIN_MODE0, self._pin, mode, state, pullUp, pullDown, openDrain, NEUTRAL_BYTE]
+        
+        self._sw.sendPacket(tx)
+
+        self._mode = mode
         self._state = state
         self._pullDown = pullDown
+        self._pullUp = pullUp
         self._openDrain = openDrain
 
     def digitalWrite(self,val):
-        if self._state == 1:
+        if self._mode == PIN_MODE_CONTROLLED:
             return self._sw.writePublicData(self._pin, val)
+        else:
+            return 'Pin is not in output mode'
 
     def digitalRead(self):
         return self._sw.readPublicData(self._pin)
 
     @property
     def pinConfig(self):
-        return (self._state, self._pullDown, self._openDrain)
+        return (self._mode, self._state, self._pullUp, self._pullDown, self._openDrain)
 
 
 class AnalogInput(SerialWombatPin):
     def begin(self, averageSamples=64, filterConstant = 0xFF80, output = 0):
-        self._pinMode = 2 #Analog input
-        tx = [200, self._pin,self._pinMode, 0, 0, 0, 0, 0]
+        self._pinMode = PIN_MODE_ANALOG_INPUT #Analog input
+        tx = [CFG_PIN_MODE0, self._pin, self._pinMode, 0, 0, 0, 0, 0]
         count, rx = self._sw.sendPacket(tx)
         if (count < 0):
             return count
-        tx = [201, self._pin, self._pinMode, averageSamples & 0xFF, int(averageSamples / 256), filterConstant& 0xFF, int(filterConstant / 256), output]
+        tx = [CFG_PIN_MODE1, self._pin, self._pinMode, averageSamples & 0xFF, int(averageSamples / 256), filterConstant& 0xFF, int(filterConstant / 256), output]
         count, rx = self._sw.sendPacket(tx)
         self.updateSupplyVoltage_mV()
         return count
@@ -57,8 +75,8 @@ class AnalogInput(SerialWombatPin):
         return (x)
 
     def readFilteredCounts(self):
-        tx = [204, self._pin, self._pinMode, 0x55, 0x55, 0x55, 0x55, 0x55]
-        count,rx = self._sw.sendPacket(tx)
+        tx = [CFG_PIN_MODE4, self._pin, self._pinMode, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE]
+        count, rx = self._sw.sendPacket(tx)
         if (count < 0):
             return 0
         return (rx[5] + 256 * rx[6])
@@ -72,8 +90,8 @@ class AnalogInput(SerialWombatPin):
         return (x)
 
     def readAveragedCounts(self):
-        tx = [204, self._pin, self._pinMode, 0x55, 0x55, 0x55, 0x55, 0x55]
-        count,rx = self._sw.sendPacket(tx)
+        tx = [CFG_PIN_MODE4, self._pin, self._pinMode, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE]
+        count, rx = self._sw.sendPacket(tx)
         if (count < 0):
             return 0
         return (rx[3] + 256 * rx[4])
@@ -88,11 +106,11 @@ class AnalogInput(SerialWombatPin):
         return (x)
 
     def readMaximumCounts(self,resetAfterRead = False):
-        tx = [203, self._pin, self._pinMode, 0x55, 0x55, 0x55, 0x55, 0x55]
+        tx = [CFG_PIN_MODE3, self._pin, self._pinMode, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE]
         if (resetAfterRead):
             tx[3] = 1
 
-        count,rx = self._sw.sendPacket(tx)
+        count, rx = self._sw.sendPacket(tx)
         if (count < 0):
             return 0
         return (rx[5] + 256 * rx[6])
@@ -104,23 +122,22 @@ class AnalogInput(SerialWombatPin):
         return (x)
 
     def readMinimumCounts(self, resetAfterRead = False):
-        tx = [203, self._pin, self._pinMode, 0x55, 0x55, 0x55, 0x55, 0x55]
+        tx = [CFG_PIN_MODE3, self._pin, self._pinMode, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE]
         if (resetAfterRead):
             tx[3] = 1
 
-        count,rx = self._sw.sendPacket(tx)
+        count, rx = self._sw.sendPacket(tx)
         if (count < 0):
             return 0
         return (rx[3] + 256 * rx[4])
 
-class Servo (DigitalPin):
+class Servo (SerialWombatPin):
     _min = 544
     _max = 2400
     _reverse = 0
     _position = 0
 
-    def attach(self, pin, init_angle, minimum = 544, maximum = 2400, min_angle = 0, max_angle = 180, reverse = False):
-        self._pin = pin
+    def attach(self, init_angle, minimum = 544, maximum = 2400, min_angle = 0, max_angle = 180, reverse = False):
         self._min = minimum
         self._max = maximum
         self._min_angle = min_angle
@@ -129,13 +146,13 @@ class Servo (DigitalPin):
             self._reverse = 1
         else:
             self._reverse = 0
-        self._pinMode =  3 # Servo
+        self._pinMode =  PIN_MODE_SERVO # Servo
 
-        tx = [200, self._pin, self._pinMode,self._pin,self._position & 0xFF, int(self._position / 256), self._reverse, 0x55]
+        tx = [CFG_PIN_MODE0, self._pin, self._pinMode, self._pin, self._position & 0xFF, int(self._position / 256), self._reverse, NEUTRAL_BYTE]
 
         self._sw.sendPacket(tx)
         duration = self._max - self._min
-        tx2 = [201, self._pin, self._pinMode,self._min & 0xFF, int(self._min / 256), duration & 0xFF, int(duration / 256), 0x55, 0x55]
+        tx2 = [CFG_PIN_MODE1, self._pin, self._pinMode,self._min & 0xFF, int(self._min / 256), duration & 0xFF, int(duration / 256), NEUTRAL_BYTE, NEUTRAL_BYTE]
         self._sw.sendPacket(tx2)
         
         self.write(init_angle)
@@ -162,13 +179,13 @@ class Servo (DigitalPin):
 
 class UltrasonicDistanceSensor (SerialWombatPin):
     def begin(self, driver, triggerPin, autoTrigger = True, pullUp = False):
-        self._pinMode =  27 # Ultrasonic Distance
+        self._pinMode = PIN_MODE_ULTRASONIC_DISTANCE # Ultrasonic Distance
 
-        tx = [200, self._pin, self._pinMode,driver, triggerPin, pullUp, autoTrigger, 0x55]
+        tx = [CFG_PIN_MODE0, self._pin, self._pinMode,driver, triggerPin, pullUp, autoTrigger, NEUTRAL_BYTE]
         self._sw.sendPacket(tx)
 
     def readPulseCount(self):
-        tx = [202, self._pin, self._pinMode, 0x55, 0x55, 0x55, 0x55, 0x55]
+        tx = [CFG_PIN_MODE2, self._pin, self._pinMode, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE]
         count, rx= self._sw.sendPacket(tx)
         if (count >= 0):
             return (rx[5] + 256*rx[6])
@@ -176,16 +193,15 @@ class UltrasonicDistanceSensor (SerialWombatPin):
             return(0)
 
     def manualTrigger(self):
-        tx = [201, self._pin, self._pinMode, 1, 0x55, 0x55, 0x55, 0x55]
+        tx = [CFG_PIN_MODE1, self._pin, self._pinMode, 1, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE]
         self._sw.sendPacket(tx)
 
-class PWM (DigitalPin):
+class PWM (SerialWombatPin):
     _dutyCycle = 0
-    def begin(self, pin, dutyCycle = 0, invert = False):
-        self._pin = pin
-        self._pinMode =  16 # PWM
+    def begin(self, dutyCycle = 0, invert = False):
+        self._pinMode =  PIN_MODE_PWM # PWM
 
-        tx = [200, self._pin, self._pinMode,self._pin,dutyCycle & 0xFF, int(dutyCycle / 256), invert,0x55]
+        tx = [CFG_PIN_MODE0, self._pin, self._pinMode, self._pin, dutyCycle & 0xFF, int(dutyCycle / 256), invert, NEUTRAL_BYTE]
         self._sw.sendPacket(tx)
 
     def writeDutyCycle(self, dutyCycle):
@@ -193,22 +209,21 @@ class PWM (DigitalPin):
 
 class PWM_4AB (PWM):
     def setFrequency(self, frequencyEnum):
-        tx = [220, self._pin, frequencyEnum, 0x55, 0x55, 0x55, 0x55]
+        tx = [CFG_PIN_MODE_HW_0, self._pin, frequencyEnum, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE, NEUTRAL_BYTE]
         self._sw.sendPacket(tx)
 
 class PWM_18AB (PWM):
     def writePeriod_uS(self, period_uS):
-        tx = [220, self._pin, int(period_uS / (256*256*256)), int(period_uS / (256*256))& 0xFF, int(period_uS / (256)) & 0xFF, period_uS & 0xFF, 0x55]
+        tx = [CFG_PIN_MODE_HW_0, self._pin, int(period_uS / (256*256*256)), int(period_uS / (256*256))& 0xFF, int(period_uS / (256)) & 0xFF, period_uS & 0xFF, NEUTRAL_BYTE]
         self._sw.sendPacket(tx)
 
     def writeFrequency_Hz(self, frequency_Hz):
         self.writePeriod_uS(int(1000000/frequency_Hz))
 
 class QuadEnc (SerialWombatPin):
-    def begin(self,pin,secondPin,debounce_mS = 10,pullUpsEnabled = True, readState = 6): #6 = both, polling
-        self._pin = pin
-        self._pinMode = 5 #Quadrature Encoder
-        tx = [200, self._pin, self._pinMode, debounce_mS & 0xFF, int(debounce_mS/256), secondPin, readState, int(pullUpsEnabled == True)]
+    def begin(self, secondPin, debounce_mS = 10, pullUpsEnabled = True, readState = 6): #6 = both, polling
+        self._pinMode = PIN_MODE_QUADRATURE_ENC #Quadrature Encoder
+        tx = [CFG_PIN_MODE0, self._pin, self._pinMode, debounce_mS & 0xFF, int(debounce_mS/256), secondPin, readState, int(pullUpsEnabled == True)]
         count, rx = self._sw.sendPacket(tx)
         return count
 
