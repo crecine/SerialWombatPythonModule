@@ -29,9 +29,13 @@ class SerialWombatChipI2c(SerialWombat.SerialWombatChip):
         # set address i2cAddress, start, read 8 bytes, stop, exit
         # rx = self.pi.bb_i2c_zip(self.sda,[4, self.i2cAddress, 2, 6, 8, 3,0])
         rx = bytearray([0]*8)
+        n = 0
         while rx == bytearray([0]*8):
+            n += 1
             time.sleep(0.002)
             i2c.readfrom_into(self.i2cAddress,rx)
+            if n>= 100:
+                break
         
         #self.pi.bb_i2c_close(self.sda)
         i2c.unlock()
