@@ -16,20 +16,24 @@ class SerialWombatChipI2c(SerialWombat.SerialWombatChip):
 
 
     def sendPacket (self,tx):
+        tx = bytearray(tx)
         # self.pi.bb_i2c_open(self.sda,self.scl,self.freq)
-        with I2CTarget(self.scl, self.sda, (self.i2cAddress)) as device:
-            # set address i2cAddress, start, write 8 bytes, stop, exit
-            # self.pi.bb_i2c_zip(self.sda,[4, self.i2cAddress, 2, 7, 8] + tx+ [3,0])
-            r = device.request(timeout=0)
-            n = r.write(bytes(tx))
-            
+        i2c = busio.I2C(self.scl, self.sda, frequency=self.freq)
+        while not i2c.try_lock():
+            pass
+        
+        # set address i2cAddress, start, write 8 bytes, stop, exit
+        # self.pi.bb_i2c_zip(self.sda,[4, self.i2cAddress, 2, 7, 8] + tx+ [3,0])
+        i2c.writeto(self.i2cAddress, tx)
+        
+        # set address i2cAddress, start, read 8 bytes, stop, exit
+        # rx = self.pi.bb_i2c_zip(self.sda,[4, self.i2cAddress, 2, 6, 8, 3,0])
+        rx = bytearray([0]*8)
+        while rx == bytearray([0]*8):
             time.sleep(0.002)
-            
-            # set address i2cAddress, start, read 8 bytes, stop, exit
-            # rx = self.pi.bb_i2c_zip(self.sda,[4, self.i2cAddress, 2, 6, 8, 3,0])
-            b = r.read(n=8)
-            
-            #self.pi.bb_i2c_close(self.sda)
-            r.__exit__()
-            device.deinint()
-        return n,b  #TODO add error check, size check
+            i2c.readfrom_into(self.i2cAddress,rx)
+        
+        #self.pi.bb_i2c_close(self.sda)
+        i2c.unlock()
+        i2c.deinit()
+        return len(rx),rx  #TODO add error check, size check
